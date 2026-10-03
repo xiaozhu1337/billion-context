@@ -357,6 +357,32 @@ test("HTTP persistence failure leaves no child and retry can succeed", async () 
     } finally { _setStoreForTest(h.store); await h.close(); }
 });
 
+test("HTTP conflicting child on disk fails closed when the store has not discovered it instead of being overwritten", async () => {
+    const h = await harness(true);
+    try {
+        assert(h.store.flushSync(resolveConversation("parent").session!));
+        const snapshot = (await h.request("/__bili/plugin/snapshot?conversationId=parent")).body;
+        const req = forkRequest(snapshot);
+        assert.equal((await h.request("/__bili/plugin/fork", req)).status, 201);
+        const parentMeta = { protocol: resolveConversation("parent").session!.meta.protocol, upstreamOrigin: resolveConversation("parent").session!.meta.upstreamOrigin };
+        const receiptBefore = h.store.loadSync("child", parentMeta)?.metadata.publicForkReceipt;
+        assert(receiptBefore);
+        // Kernel-documented boundary: a store instance that neither wrote nor
+        // loadAll()-discovered these files resolves namespaced records only via
+        // the meta hint (cross-process / externally-moved file shapes).
+        const fresh = new SessionStore({ dir: h.dir + "/sessions", enabled: true, debounceMs: 60000 });
+        assert.equal(fresh.loadSync("child"), null);
+        _setStoreForTest(fresh);
+        _resetSessionsForTest();
+        _resetPluginStateForTest();
+        getSession("parent", parentMeta);
+        const conflict = await h.request("/__bili/plugin/fork", { ...req, idempotencyKey: "different" });
+        assert.equal(conflict.status, 409, JSON.stringify(conflict.body));
+        assert.equal(conflict.body.code, "CHILD_CONFLICT");
+        assert.deepEqual(fresh.loadSync("child", parentMeta)?.metadata.publicForkReceipt, receiptBefore);
+    } finally { _setStoreForTest(h.store); await h.close(); }
+});
+
 test("HTTP fork revision and originals survive a new proxy process", async () => {
     const h = await harness(true);
     let child: ReturnType<typeof spawn> | undefined;

@@ -927,6 +927,7 @@ export async function handlePluginFork(payload: string, res: ServerResponse): Pr
             forkReply(res, 201, response);
         });
     } catch (err) {
+        if (err instanceof Error && err.message === "child session already exists") return forkReply(res, 409, { ok: false, code: "CHILD_CONFLICT", error: "child conversation already exists or idempotency payload differs" });
         forkReply(res, 503, { ok: false, status: "unavailable", code: "FORK_FAILED", error: String(err) });
     } finally {
         releaseInFlight(parent);

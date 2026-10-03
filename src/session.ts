@@ -557,7 +557,11 @@ export function createSession(id: string, meta?: Session["meta"]): Session {
 }
 
 export function publishForkSession(session: Session): void {
-    if (sessions.has(session.id) || getStore().loadSync(session.id)) throw new Error("child session already exists");
+    // Meta-aware disk probe: without protocol meta a no-discovery store only
+    // sees the _unknown/ fallback path and misses namespaced child files
+    // (anthropic/…), letting a conflicting retry overwrite an established
+    // child file this store instance never wrote or loadAll()-discovered.
+    if (sessions.has(session.id) || getStore().loadSync(session.id, { protocol: session.meta.protocol, upstreamOrigin: session.meta.upstreamOrigin })) throw new Error("child session already exists");
     if (sessions.size >= MAX_SESSIONS && !evictOldest()) throw new Error("session pool exhausted");
     if (!getStore().flushSync(session)) throw new Error("fork persistence failed");
     session.persisted = getStore().enabled;
